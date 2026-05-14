@@ -89,22 +89,6 @@ An AI-powered multilingual emergency response platform designed to assist users 
 
 ---
 
-## 📸 Screenshots
-
-### 🖥️ Home Interface
-_Add screenshot here_
-
-### 💬 AI Chat Interface
-_Add screenshot here_
-
-### 🗺️ Live Map Visualization
-_Add screenshot here_
-
-### 📊 Analytics Dashboard
-_Add screenshot here_
-
----
-
 ## ⚙️ Installation
 
 ```bash

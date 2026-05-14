@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Login — Emergency AI</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="page-home">
+    <div class="nav">
+        <div class="nav-inner">
+            <a class="brand" href="index.html">🚨 Emergency AI</a>
+            <div class="nav-links">
+                <a class="link" href="login.html">Account</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container" style="max-width: 520px;">
+        <div class="card" style="margin-top: 24px;">
+            <h1 style="margin-top: 0;">🔐 Account Authentication</h1>
+            <p class="muted">Create an account or sign in to access protected features.</p>
+            <p id="auth-hint" class="muted" style="font-size: 13px;">Local authentication is enabled for this project.</p>
+
+            <div id="auth-box">
+                <div class="row" style="margin-bottom: 10px;">
+                    <input type="email" id="email" placeholder="Email" autocomplete="username" style="flex: 1;">
+                </div>
+                <div class="row" style="margin-bottom: 10px;">
+                    <input type="password" id="password" placeholder="Password" autocomplete="current-password" style="flex: 1;">
+                </div>
+                <div class="row" style="gap: 8px;">
+                    <button type="button" class="btn" id="btn-signin">Sign in</button>
+                    <button type="button" class="btn2" id="btn-signup">Create account</button>
+                    <button type="button" class="btn2" id="btn-signout" style="display:none;">Sign out</button>
+                </div>
+            </div>
+
+            <div id="user-status" class="muted" style="margin-top: 10px;"></div>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        const params = new URLSearchParams(window.location.search);
+        const nextPage = (params.get("next") || "").replace(/[^a-zA-Z0-9_.-]/g, "");
+        const hint = document.getElementById("auth-hint");
+        const statusBox = document.getElementById("user-status");
+        const btnSignin = document.getElementById("btn-signin");
+        const btnSignup = document.getElementById("btn-signup");
+        const btnSignout = document.getElementById("btn-signout");
+        const emailBox = document.getElementById("email");
+        const passwordBox = document.getElementById("password");
+        async function fetchMe() {
+            const res = await fetch("/auth/me");
+            const data = await res.json();
+            return data;
+        }
+
+        function setAuthUI(payload) {
+            if (payload && payload.authenticated && payload.user) {
+                statusBox.textContent = "Signed in as " + payload.user.email;
+                btnSignout.style.display = "inline-flex";
+                btnSignin.style.display = "none";
+                btnSignup.style.display = "none";
+                hint.textContent = "Authentication active. Redirecting to your app...";
+                const roleHome = payload.user.role === "admin" ? "admin.html" : "user.html";
+                setTimeout(() => { window.location.href = nextPage || roleHome; }, 500);
+            } else {
+                statusBox.textContent = "Not signed in.";
+                btnSignout.style.display = "none";
+                btnSignin.style.display = "inline-flex";
+                btnSignup.style.display = "inline-flex";
+                hint.textContent = "Local authentication is enabled for this project.";
+            }
+        }
+
+        btnSignin.addEventListener("click", async () => {
+            const email = emailBox.value.trim();
+            const password = passwordBox.value;
+            try {
+                const res = await fetch("/auth/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || "Sign in failed");
+                setAuthUI({ authenticated: true, user: data.user });
+            } catch (e) {
+                alert(e.message || "Sign in failed");
+            }
+        });
+
+        btnSignup.addEventListener("click", async () => {
+            const email = emailBox.value.trim();
+            const password = passwordBox.value;
+            try {
+                const res = await fetch("/auth/register", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || "Sign up failed");
+                alert(data.message || "Account created. Please sign in.");
+            } catch (e) {
+                alert(e.message || "Sign up failed");
+            }
+        });
+
+        btnSignout.addEventListener("click", async () => {
+            await fetch("/auth/logout", { method: "POST" });
+            setAuthUI({ authenticated: false });
+        });
+        fetchMe().then(setAuthUI).catch(() => setAuthUI({ authenticated: false }));
+    })();
+    </script>
+</body>
+</html>

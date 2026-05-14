@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dashboard — Emergency AI</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <script src="user-guard.js"></script>
+    <div class="nav">
+        <div class="nav-inner">
+            <a class="brand" href="index.html">🚨 Emergency AI</a>
+            <div class="nav-links">
+                <a class="link" href="chat.html">Chat</a>
+                <a class="link" href="dashboard.html">Dashboard</a>
+                <a class="link" href="map.html">Live Map</a>
+                <a class="link" href="#" id="logout-link">Logout</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="hero" style="padding-top: 16px;">
+            <h1>📊 Emergency dashboard</h1>
+            <p class="muted">Counts, charts, and time analysis. Sign in + Firebase to merge your saved history.</p>
+            <p id="dash-auth" class="muted" style="font-size: 13px;"></p>
+        </div>
+
+        <div class="row" style="margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+            <button type="button" class="chip filter-btn" data-filter="all">All</button>
+            <button type="button" class="chip filter-btn" data-filter="fire">🔥 Fire</button>
+            <button type="button" class="chip filter-btn" data-filter="medical">🚑 Ambulance</button>
+            <button type="button" class="chip filter-btn" data-filter="police">🚓 Police</button>
+            <button type="button" class="chip filter-btn" data-filter="natural_disaster">🌊 Disaster</button>
+            <button type="button" class="chip filter-btn" data-filter="utility">⚡ Utility</button>
+        </div>
+
+        <div class="grid">
+            <div class="card col-6">
+                <h3>Total (filtered)</h3>
+                <div id="total" style="font-size: 34px; font-weight: 800;">—</div>
+                <div class="muted" id="total-breakdown"></div>
+            </div>
+            <div class="card col-6">
+                <h3>By type (session + cloud)</h3>
+                <div id="counts-text" class="muted" style="font-size: 14px;"></div>
+            </div>
+            <div class="card col-6">
+                <h3>Bar — emergencies per type</h3>
+                <canvas id="chart-bar" height="220"></canvas>
+            </div>
+            <div class="card col-6">
+                <h3>Pie — share by type</h3>
+                <canvas id="chart-pie" height="220"></canvas>
+            </div>
+            <div class="card col-12">
+                <h3>Time — by hour of day (UTC)</h3>
+                <canvas id="chart-line" height="180"></canvas>
+            </div>
+            <div class="card col-12">
+                <h3>Logs</h3>
+                <div id="logs"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="firebase-app.js"></script>
+    <script>
+    const TYPE_LABELS = {
+        fire: "Fire",
+        medical: "Ambulance",
+        police: "Police",
+        natural_disaster: "Disaster",
+        utility: "Utility"
+    };
+    const TYPE_COLORS = {
+        fire: "#f97316",
+        medical: "#ef4444",
+        police: "#22c55e",
+        natural_disaster: "#38bdf8",
+        utility: "#eab308"
+    };
+
+    let charts = { bar: null, pie: null, line: null };
+    let currentFilter = "all";
+    let mergedLogs = [];
+
+    function escapeHtml(str) {
+        return String(str)
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll("\"", "&quot;")
+            .replaceAll("'", "&#039;");
+    }
+
+    function uniqLogs(a, b) {
+        const seen = new Set();
+        const out = [];
+        for (const l of [...a, ...b]) {
+            const key = (l.ts || "") + "|" + (l.msg || "") + "|" + (l.type || "");
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(l);
+        }
+        return out.sort((x, y) => (y.ts || "").localeCompare(x.ts || ""));
+    }
+
+    function filterLogs(logs, f) {
+        if (f === "all") return logs;
+        return logs.filter((l) => (l.type || "") === f);
+    }
+
+    function countByType(logs) {
+        const c = {};
+        for (const l of logs) {
+            const t = l.type || "unknown";
+            c[t] = (c[t] || 0) + 1;
+        }
+        return c;
+    }
+
+    function hourBuckets(logs) {
+        const h = Array(24).fill(0);
+        for (const l of logs) {
+            if (!l.ts) continue;
+            const d = new Date(l.ts);
+            if (isNaN(d.getTime())) continue;
+            h[d.getUTCHours()]++;
+        }
+        return h;
+    }
+
+    function destroyChart(key) {
+        if (charts[key]) {
+            charts[key].destroy();
+            charts[key] = null;
+        }
+    }
+
+    function renderCharts(logs) {
+        destroyChart("bar");
+        destroyChart("pie");
+        destroyChart("line");
+
+        const barCtx = document.getElementById("chart-bar");
+        const pieCtx = document.getElementById("chart-pie");
+        const lineCtx = document.getElementById("chart-line");
+
+        if (!logs.length) {
+            charts.bar = new Chart(barCtx, {
+                type: "bar",
+                data: { labels: ["—"], datasets: [{ label: "Count", data: [0], backgroundColor: ["#64748b"] }] },
+                options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+            });
+            charts.pie = new Chart(pieCtx, {
+                type: "pie",
+                data: { labels: ["No data"], datasets: [{ data: [1], backgroundColor: ["#475569"] }] },
+                options: { responsive: true, plugins: { legend: { labels: { color: "#e2e8f0" } } } }
+            });
+            const z = Array(24).fill(0);
+            charts.line = new Chart(lineCtx, {
+                type: "line",
+                data: {
+                    labels: z.map((_, i) => i + ":00"),
+                    datasets: [{ label: "Emergencies (UTC hour)", data: z, borderColor: "#64748b", tension: 0.2 }]
+                },
+                options: { responsive: true, plugins: { legend: { labels: { color: "#e2e8f0" } } }, scales: { y: { beginAtZero: true } } }
+            });
+            return;
+        }
+
+        const counts = countByType(logs);
+        const types = Object.keys(counts).filter((t) => t !== "unknown");
+        if (types.length === 0) types.push("fire");
+        const labels = types.map((t) => TYPE_LABELS[t] || t);
+        const data = types.map((t) => counts[t] || 0);
+        const colors = types.map((t) => TYPE_COLORS[t] || "#94a3b8");
+
+        charts.bar = new Chart(barCtx, {
+            type: "bar",
+            data: {
+                labels: labels,
+                datasets: [{ label: "Count", data: data, backgroundColor: colors }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true, ticks: { color: "#cbd5e1" } }, x: { ticks: { color: "#cbd5e1" } } }
+            }
+        });
+
+        charts.pie = new Chart(pieCtx, {
+            type: "pie",
+            data: {
+                labels: labels,
+                datasets: [{ data: data, backgroundColor: colors }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { labels: { color: "#e2e8f0" } } }
+            }
+        });
+
+        const h = hourBuckets(logs);
+        charts.line = new Chart(lineCtx, {
+            type: "line",
+            data: {
+                labels: h.map((_, i) => i + ":00"),
+                datasets: [{
+                    label: "Emergencies (UTC hour)",
+                    data: h,
+                    borderColor: "#6366f1",
+                    backgroundColor: "rgba(99,102,241,0.2)",
+                    fill: true,
+                    tension: 0.25
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { labels: { color: "#e2e8f0" } } },
+                scales: { y: { beginAtZero: true, ticks: { color: "#cbd5e1" } }, x: { ticks: { color: "#cbd5e1", maxRotation: 0 } } }
+            }
+        });
+    }
+
+    function renderLogsList(logs) {
+        const html = logs.map((l) => {
+            const msg = escapeHtml(l.msg ?? "");
+            const cat = escapeHtml(l.type ?? "");
+            const tr = escapeHtml(l.translated ?? "");
+            const loc = Array.isArray(l.location) ? l.location.join(", ") : "";
+            const locText = escapeHtml(l.locationText ?? "");
+            const pc = l.peopleCaught ?? "";
+            const pi = l.peopleInjured ?? "";
+            const ts = escapeHtml(l.ts ?? "");
+            return `
+                <div class="card" style="margin-bottom: 10px;">
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:space-between;">
+                        <div><b>Category:</b> ${cat || "—"}</div>
+                        <div class="muted"><b>Time:</b> ${ts || "—"}</div>
+                    </div>
+                    <div class="muted" style="margin-top: 6px;">
+                        <b>GPS:</b> ${escapeHtml(loc) || "—"} &nbsp; • &nbsp;
+                        <b>Entered:</b> ${locText || "—"} &nbsp; • &nbsp;
+                        <b>Trapped:</b> ${escapeHtml(pc) || "—"} &nbsp; • &nbsp;
+                        <b>Injured:</b> ${escapeHtml(pi) || "—"}
+                    </div>
+                    <div style="margin-top: 8px;"><b>Message:</b> ${msg || "—"}</div>
+                    <div class="muted" style="margin-top: 6px;"><b>Translated:</b> ${tr || "—"}</div>
+                </div>
+            `;
+        }).join("");
+        document.getElementById("logs").innerHTML = html || "<div class=\"muted\">No entries for this filter.</div>";
+    }
+
+    function updateUI() {
+        const filtered = filterLogs(mergedLogs, currentFilter);
+        document.getElementById("total").textContent = filtered.length;
+        const counts = countByType(filtered);
+        const parts = Object.keys(counts).map((k) => `${TYPE_LABELS[k] || k}: ${counts[k]}`);
+        document.getElementById("counts-text").textContent = parts.length ? parts.join(" · ") : "—";
+        document.getElementById("total-breakdown").textContent =
+            "Merged: " + mergedLogs.length + " · Filter: " + currentFilter;
+
+        renderCharts(filtered);
+        renderLogsList(filtered.slice(0, 50));
+    }
+
+    document.querySelectorAll(".filter-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            currentFilter = btn.getAttribute("data-filter") || "all";
+            document.querySelectorAll(".filter-btn").forEach((b) => b.classList.remove("chip-active"));
+            btn.classList.add("chip-active");
+            updateUI();
+        });
+    });
+
+    async function loadAll() {
+        const authEl = document.getElementById("dash-auth");
+        let serverLogs = [];
+        try {
+            const res = await fetch("/stats");
+            const data = await res.json();
+            serverLogs = Array.isArray(data.logs) ? data.logs.slice().reverse() : [];
+        } catch (e) {
+            document.getElementById("logs").innerHTML = "<div class=\"muted\">Couldn’t load server stats. Run the Flask backend.</div>";
+        }
+
+        let cloudLogs = [];
+        if (window.firebaseConfigured && typeof firebase !== "undefined") {
+            const auth = firebase.auth();
+            await new Promise((resolve) => {
+                const unsub = auth.onAuthStateChanged((user) => {
+                    unsub();
+                    resolve(user);
+                });
+            });
+            if (auth.currentUser) {
+                authEl.textContent = "Signed in as " + auth.currentUser.email + " — cloud history merged.";
+                try {
+                    cloudLogs = await window.loadUserChatHistory();
+                } catch (e) {
+                    authEl.textContent += " (Firestore read failed — check rules.)";
+                }
+            } else {
+                authEl.textContent = "Not signed in — showing server session only. Open Account to log in.";
+            }
+        } else {
+            authEl.textContent = "Firebase not configured — edit firebase-config.js. Server session only.";
+        }
+
+        mergedLogs = uniqLogs(serverLogs, cloudLogs);
+        if (!mergedLogs.length) {
+            document.getElementById("total").textContent = "0";
+            document.getElementById("counts-text").textContent = "—";
+        }
+
+        document.querySelector('.filter-btn[data-filter="all"]').classList.add("chip-active");
+        currentFilter = "all";
+        updateUI();
+    }
+
+    loadAll();
+    document.getElementById("logout-link").addEventListener("click", async (e) => {
+        e.preventDefault();
+        await fetch("/auth/logout", { method: "POST" });
+        window.location.href = "login.html";
+    });
+    </script>
+    <style>
+        .chip-active { filter: brightness(1.15); border-color: rgba(255,255,255,0.45) !important; box-shadow: 0 0 0 2px rgba(99,102,241,0.35); }
+    </style>
+</body>
+</html>

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Records — Emergency AI</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="page-home">
+  <script src="admin-guard.js"></script>
+  <div class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="index.html">🚨 Emergency AI</a>
+      <div class="nav-links">
+        <a class="link" href="admin.html">Admin</a>
+        <a class="link" href="admin.html">Issue Board</a>
+        <a class="link" href="#" id="logout-link">Logout</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="hero" style="padding-top:16px;">
+      <h1>Admin Page</h1>
+      <p class="muted">Record Management and User Management.</p>
+      <p id="status" class="muted"></p>
+    </div>
+
+    <div class="card" style="margin-bottom:14px;">
+      <h3 style="margin-top:0;">Record Management</h3>
+      <div class="row" style="gap:10px; margin-bottom:10px;">
+        <input id="f-user" type="text" placeholder="Filter user email">
+        <input id="f-category" type="text" placeholder="Category">
+        <input id="f-status" type="text" placeholder="Status">
+      </div>
+      <div class="row" style="gap:10px; margin-bottom:10px;">
+        <input id="f-start" type="text" placeholder="Start YYYY-MM-DD">
+        <input id="f-end" type="text" placeholder="End YYYY-MM-DD">
+        <button class="btn2" id="btn-filter">Apply</button>
+        <button class="btn2" id="btn-clear">Clear</button>
+      </div>
+      <div class="row" style="gap:8px; margin-bottom:10px;">
+        <button class="btn2" id="bulk-resolved">Bulk Resolved</button>
+        <button class="btn2" id="bulk-hold">Bulk On Hold</button>
+        <button class="btn2" id="bulk-unresolved">Bulk Unresolved</button>
+        <button class="btn2" id="bulk-archive">Bulk Archive</button>
+        <button class="btn2" id="bulk-delete">Bulk Delete</button>
+      </div>
+      <p id="record-msg" class="muted"></p>
+    </div>
+
+    <div class="card" style="margin-bottom:14px;">
+      <h3 style="margin-top:0;">Unresolved Issues</h3>
+      <div id="records-unresolved"></div>
+    </div>
+    <div class="card" style="margin-bottom:14px;">
+      <h3 style="margin-top:0;">On Hold Issues</h3>
+      <div id="records-hold"></div>
+    </div>
+    <div class="card" style="margin-bottom:14px;">
+      <h3 style="margin-top:0;">Resolved Issues</h3>
+      <div id="records-resolved"></div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px;">
+      <h3 style="margin-top:0;">User Management</h3>
+      <div id="users-table"></div>
+    </div>
+
+  </div>
+
+  <script>
+    let selectedIds = new Set();
+
+    function escapeHtml(s) {
+      return String(s || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll("\"", "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function toggleRow(id, checked) {
+      if (checked) selectedIds.add(id);
+      else selectedIds.delete(id);
+    }
+    window.toggleRow = toggleRow;
+
+    function renderCard(r) {
+      const meta = r.resolved_by
+        ? `<div class="muted" style="margin-top:6px;"><b>Handled by:</b> ${escapeHtml(r.resolved_by)} • <b>At:</b> ${escapeHtml(r.resolved_ts || "")}</div>`
+        : "";
+      return `
+        <div class="card" style="margin-bottom:10px;">
+          <div class="row" style="justify-content:space-between;">
+            <div><input type="checkbox" onchange="toggleRow(${r.id}, this.checked)"> <b>ID:</b> ${r.id}</div>
+            <div><b>Status:</b> ${escapeHtml(r.issue_status || "unresolved")}</div>
+          </div>
+          <div style="margin-top:6px;"><b>User:</b> ${escapeHtml(r.user_email || "guest")} • <b>Category:</b> ${escapeHtml(r.category)}</div>
+          <div class="muted" style="margin-top:6px;"><b>Time:</b> ${escapeHtml(r.ts)} • <b>Lang:</b> ${escapeHtml(r.lang)}</div>
+          <div style="margin-top:8px;"><b>Message:</b> ${escapeHtml(r.msg)}</div>
+          <div class="muted" style="margin-top:6px;"><b>Response:</b> ${escapeHtml(r.response)}</div>
+          ${meta}
+          <div class="row" style="margin-top:10px; gap:8px;">
+            <button class="btn2" onclick="setStatus(${r.id}, 'resolved')">Resolved</button>
+            <button class="btn2" onclick="setStatus(${r.id}, 'on_hold')">On Hold</button>
+            <button class="btn2" onclick="setStatus(${r.id}, 'unresolved')">Unresolved</button>
+          </div>
+        </div>`;
+    }
+
+    async function setStatus(recordId, status) {
+      const res = await fetch(`/records/${recordId}/status`, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({status})
+      });
+      const data = await res.json();
+      if (!res.ok) return alert(data.error || "Status update failed");
+      await load();
+    }
+    window.setStatus = setStatus;
+
+    function getFilters() {
+      return {
+        user_email: document.getElementById("f-user").value.trim(),
+        category: document.getElementById("f-category").value.trim(),
+        status: document.getElementById("f-status").value.trim(),
+        start: document.getElementById("f-start").value.trim(),
+        end: document.getElementById("f-end").value.trim()
+      };
+    }
+
+    async function bulkAction(url, body) {
+      const msg = document.getElementById("record-msg");
+      if (!selectedIds.size) return (msg.textContent = "Select at least one record.");
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({...body, ids: Array.from(selectedIds)})
+      });
+      const data = await res.json();
+      if (!res.ok) return (msg.textContent = data.error || "Bulk action failed");
+      msg.textContent = "Bulk action completed.";
+      selectedIds = new Set();
+      await load();
+    }
+
+    async function loadUsers() {
+      const res = await fetch("/admin/users");
+      const data = await res.json();
+      const host = document.getElementById("users-table");
+      if (!res.ok) return host.innerHTML = `<div class="muted">${escapeHtml(data.error || "Failed to load users")}</div>`;
+      const users = data.users || [];
+
+      // Show unique users by email only once.
+      const unique = [];
+      const seen = new Set();
+      for (const u of users) {
+        const key = String(u.email || "").toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        unique.push(u);
+      }
+
+      host.innerHTML = unique.map(u => `
+        <div class="card" style="margin-bottom:10px;">
+          <div><b>${escapeHtml(u.email)}</b> (${escapeHtml(u.role)}) ${u.is_active ? "" : "<span class='muted'>(disabled)</span>"}</div>
+          <div class="muted" style="margin-top:6px;">Total: ${u.total_records || 0} • Unresolved: ${u.unresolved_count || 0} • Last login: ${escapeHtml(u.last_login_at || "—")}</div>
+        </div>`).join("") || `<div class="muted">No users found.</div>`;
+    }
+
+    async function load() {
+      const me = await fetch("/auth/me").then(r => r.json());
+      if (!me.authenticated) return window.location.href = "login.html?next=admin.html";
+      if ((me.user && me.user.role) !== "admin") return document.getElementById("status").textContent = "Access denied: admin role required.";
+      document.getElementById("status").textContent = `Signed in as ${me.user.email} (admin)`;
+
+      const f = getFilters();
+      const qs = new URLSearchParams();
+      Object.entries(f).forEach(([k,v]) => { if (v) qs.set(k, v); });
+      const res = await fetch("/records/all?" + qs.toString());
+      const data = await res.json();
+      if (!res.ok) {
+        document.getElementById("records-unresolved").innerHTML = `<div class="muted">${escapeHtml(data.error || "Failed to load records")}</div>`;
+        document.getElementById("records-hold").innerHTML = "";
+        document.getElementById("records-resolved").innerHTML = "";
+        return;
+      }
+      const rows = data.records || [];
+      const unresolved = rows.filter(r => (r.issue_status || "unresolved") === "unresolved");
+      const onHold = rows.filter(r => (r.issue_status || "") === "on_hold");
+      const resolved = rows.filter(r => (r.issue_status || "") === "resolved");
+      document.getElementById("records-unresolved").innerHTML = unresolved.map(renderCard).join("") || `<div class="muted">No unresolved issues.</div>`;
+      document.getElementById("records-hold").innerHTML = onHold.map(renderCard).join("") || `<div class="muted">No on-hold issues.</div>`;
+      document.getElementById("records-resolved").innerHTML = resolved.map(renderCard).join("") || `<div class="muted">No resolved issues.</div>`;
+
+      await loadUsers();
+    }
+
+    document.getElementById("btn-filter").addEventListener("click", load);
+    document.getElementById("btn-clear").addEventListener("click", () => {
+      document.getElementById("f-user").value = "";
+      document.getElementById("f-category").value = "";
+      document.getElementById("f-status").value = "";
+      document.getElementById("f-start").value = "";
+      document.getElementById("f-end").value = "";
+      load();
+    });
+    document.getElementById("bulk-resolved").addEventListener("click", () => bulkAction("/records/bulk-status", {status:"resolved"}));
+    document.getElementById("bulk-hold").addEventListener("click", () => bulkAction("/records/bulk-status", {status:"on_hold"}));
+    document.getElementById("bulk-unresolved").addEventListener("click", () => bulkAction("/records/bulk-status", {status:"unresolved"}));
+    document.getElementById("bulk-archive").addEventListener("click", () => bulkAction("/records/bulk-archive", {archive:true}));
+    document.getElementById("bulk-delete").addEventListener("click", () => {
+      if (!confirm("Delete selected records permanently?")) return;
+      bulkAction("/records/bulk-delete", {});
+    });
+    document.getElementById("logout-link").addEventListener("click", async (e) => {
+      e.preventDefault();
+      await fetch("/auth/logout", { method: "POST" });
+      window.location.href = "login.html";
+    });
+    load();
+  </script>
+</body>
+</html>
+

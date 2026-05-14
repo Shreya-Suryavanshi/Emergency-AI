@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>User Records — Emergency AI</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="page-home">
+  <script src="user-guard.js"></script>
+  <div class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="index.html">🚨 Emergency AI</a>
+      <div class="nav-links">
+        <a class="link" href="user.html">User</a>
+        <a class="link" href="chat.html">Chat</a>
+        <a class="link" href="dashboard.html">Dashboard</a>
+        <a class="link" href="map.html">Live Map</a>
+        <a class="link" href="#" id="logout-link">Logout</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="hero" style="padding-top:16px;">
+      <h1>User Page</h1>
+      <p class="muted">This page shows your own records only.</p>
+      <p id="status" class="muted"></p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">My Records</h3>
+      <div id="records"></div>
+    </div>
+  </div>
+
+  <script>
+    function escapeHtml(s) {
+      return String(s || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll("\"", "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+    document.getElementById("logout-link").addEventListener("click", async (e) => {
+      e.preventDefault();
+      await fetch("/auth/logout", { method: "POST" });
+      window.location.href = "login.html";
+    });
+    async function load() {
+      const me = await fetch("/auth/me").then(r => r.json());
+      if (!me.authenticated) {
+        window.location.href = "login.html?next=user.html";
+        return;
+      }
+      document.getElementById("status").textContent = `Signed in as ${me.user.email} (${me.user.role})`;
+      const res = await fetch("/records/me");
+      const data = await res.json();
+      if (!res.ok) {
+        document.getElementById("records").innerHTML = `<div class="muted">${escapeHtml(data.error || "Failed to load records")}</div>`;
+        return;
+      }
+      const rows = data.records || [];
+      document.getElementById("records").innerHTML = rows.map(r => `
+        <div class="card" style="margin-bottom:10px;">
+          <div><b>Category:</b> ${escapeHtml(r.category)} &nbsp; <b>Status:</b> ${escapeHtml(r.issue_status || "unresolved")}</div>
+          <div class="muted" style="margin-top:6px;"><b>Time:</b> ${escapeHtml(r.ts)} &nbsp; • &nbsp; <b>Lang:</b> ${escapeHtml(r.lang)}</div>
+          <div style="margin-top:8px;"><b>Message:</b> ${escapeHtml(r.msg)}</div>
+          <div class="muted" style="margin-top:6px;"><b>Response:</b> ${escapeHtml(r.response)}</div>
+        </div>
+      `).join("") || `<div class="muted">No records yet.</div>`;
+    }
+    load();
+  </script>
+</body>
+</html>
+

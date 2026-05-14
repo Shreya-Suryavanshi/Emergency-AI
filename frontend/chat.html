@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chat</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <script src="user-guard.js"></script>
+    <div class="nav">
+        <div class="nav-inner">
+            <a class="brand" href="index.html">🚨 Emergency AI</a>
+            <div class="nav-links">
+                <a class="link" href="chat.html">Chat</a>
+                <a class="link" href="dashboard.html">Dashboard</a>
+                <a class="link" href="map.html">Live Map</a>
+                <a class="link" href="#" id="logout-link">Logout</a>
+                <a class="link" href="about.html">About</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="chat-welcome-bar">
+        <div class="chat-welcome-inner">
+            <span class="chat-welcome-title">Emergency Chat Interface</span>
+            <span class="chat-welcome-makers">— ML-based multilingual response</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="card chat-container">
+            <div class="chat-title">
+                <h2>💬 Emergency Chat</h2>
+                <div class="row">
+                    <select id="language" title="Speech input language (where supported)">
+                        <option value="en-IN">English (India)</option>
+                        <option value="hi-IN">Hindi</option>
+                        <option value="mr-IN">Marathi</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid" style="margin-bottom: 10px;">
+                <div class="col-12">
+                    <input type="text" id="locationText" placeholder="Enter location (area / landmark / address)" />
+                    <div class="muted" style="margin-top: 6px; font-size: 13px;">
+                        Tip: allow location access in your browser, or type it manually here.
+                    </div>
+                </div>
+                <div class="col-6">
+                    <input type="text" inputmode="numeric" id="peopleCaught" placeholder="How many people are trapped/caught? (optional)" />
+                </div>
+                <div class="col-6">
+                    <input type="text" inputmode="numeric" id="peopleInjured" placeholder="How many are injured? (optional)" />
+                </div>
+            </div>
+
+            <div class="quick-service-row">
+                <span class="quick-service-label">Faster than typing</span>
+                <div class="chips">
+                    <button type="button" class="chip chip-lg" data-service="fire" title="Fire">🔥 Fire</button>
+                    <button type="button" class="chip chip-lg" data-service="medical" title="Ambulance">🚑 Ambulance</button>
+                    <button type="button" class="chip chip-lg" data-service="police" title="Police">🚓 Police</button>
+                </div>
+            </div>
+
+            <div class="card" style="padding: 12px; margin-bottom: 12px;">
+                <div style="font-weight: 750; margin-bottom: 8px;">Quick emergency types</div>
+                <div class="chips" id="quick-types"></div>
+                <div class="muted" style="margin-top: 8px; font-size: 13px;">
+                    Tap a type to auto-fill the message, then add details if needed.
+                </div>
+            </div>
+
+            <div id="chat-box" aria-live="polite"></div>
+
+            <div class="row">
+                <input type="text" id="msg" placeholder="Describe your emergency (e.g., 'There is a fire')" />
+                <button class="btn" onclick="sendMessage()">Send</button>
+                <button class="btn2" onclick="startVoice()">🎤 Speak</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="firebase-app.js"></script>
+<script src="script.js"></script>
+<script>
+document.getElementById("logout-link").addEventListener("click", async (e) => {
+    e.preventDefault();
+    await fetch("/auth/logout", { method: "POST" });
+    window.location.href = "login.html";
+});
+</script>
+</body>
+</html>

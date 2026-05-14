@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Live Map — Emergency AI</title>
+    <link rel="stylesheet" href="style.css">
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin=""
+    />
+    <style>
+        #map-canvas { width: 100%; height: min(70vh, 560px); border-radius: 16px; border: 1px solid rgba(255,255,255,0.14); }
+        .map-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 13px; }
+        .map-legend span { display: inline-flex; align-items: center; gap: 6px; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    </style>
+</head>
+<body class="page-home">
+    <script src="user-guard.js"></script>
+    <div class="nav">
+        <div class="nav-inner">
+            <a class="brand" href="index.html">🚨 Emergency AI</a>
+            <div class="nav-links">
+                <a class="link" href="chat.html">Chat</a>
+                <a class="link" href="dashboard.html">Dashboard</a>
+                <a class="link" href="map.html">Live Map</a>
+                <a class="link" href="#" id="logout-link">Logout</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="hero" style="padding-top: 16px;">
+            <h1>🗺️ Live map</h1>
+            <p class="muted">Interactive live map with your location and nearby hospitals, police stations, and fire stations.</p>
+            <p id="map-key-hint" class="muted" style="font-size: 13px;">Powered by OpenStreetMap (free, no API key needed).</p>
+        </div>
+
+        <div class="card">
+            <div class="row" style="margin-bottom: 10px;">
+                <button type="button" class="btn" id="btn-locate">📍 Use my location</button>
+                <button type="button" class="btn2" id="btn-refresh">🔄 Refresh nearby services</button>
+            </div>
+            <div id="map-canvas"></div>
+            <div class="map-legend">
+                <span><span class="dot" style="background:#3b82f6;"></span> You</span>
+                <span><span class="dot" style="background:#ef4444;"></span> Hospital</span>
+                <span><span class="dot" style="background:#22c55e;"></span> Police</span>
+                <span><span class="dot" style="background:#f97316;"></span> Fire station</span>
+            </div>
+        </div>
+    </div>
+    <script
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""
+    ></script>
+    <script>
+    let map;
+    let userMarker;
+    let nearbyLayer;
+    let currentLat = 19.076;
+    let currentLon = 72.8777;
+
+    function createCircleIcon(color) {
+        return L.divIcon({
+            className: "",
+            html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,0.25)"></div>`,
+            iconSize: [14, 14],
+            iconAnchor: [7, 7]
+        });
+    }
+
+    function initMap(lat, lon) {
+        currentLat = lat;
+        currentLon = lon;
+
+        map = L.map("map-canvas", { zoomControl: true }).setView([lat, lon], 14);
+
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+            attribution: "&copy; OpenStreetMap contributors"
+        }).addTo(map);
+
+        userMarker = L.marker([lat, lon], {
+            icon: createCircleIcon("#3b82f6")
+        }).addTo(map).bindPopup("Your location");
+
+        nearbyLayer = L.layerGroup().addTo(map);
+        loadNearbyServices(lat, lon);
+    }
+
+    async function loadNearbyServices(lat, lon) {
+        nearbyLayer.clearLayers();
+
+        // Overpass API query for nearby emergency services.
+        const query = `
+            [out:json][timeout:25];
+            (
+              node(around:5000,${lat},${lon})[amenity=hospital];
+              way(around:5000,${lat},${lon})[amenity=hospital];
+              node(around:5000,${lat},${lon})[amenity=police];
+              way(around:5000,${lat},${lon})[amenity=police];
+              node(around:5000,${lat},${lon})[amenity=fire_station];
+              way(around:5000,${lat},${lon})[amenity=fire_station];
+            );
+            out center;
+        `;
+
+        try {
+            const res = await fetch("https://overpass-api.de/api/interpreter", {
+                method: "POST",
+                body: query
+            });
+            const data = await res.json();
+            const elements = data.elements || [];
+
+            elements.slice(0, 120).forEach((el) => {
+                const t = (el.tags && el.tags.amenity) || "";
+                const name = (el.tags && el.tags.name) || t;
+                const latEl = el.lat || (el.center && el.center.lat);
+                const lonEl = el.lon || (el.center && el.center.lon);
+                if (!latEl || !lonEl) return;
+
+                let color = "#f97316";
+                let label = "Fire station";
+                if (t === "hospital") { color = "#ef4444"; label = "Hospital"; }
+                else if (t === "police") { color = "#22c55e"; label = "Police"; }
+
+                L.marker([latEl, lonEl], { icon: createCircleIcon(color) })
+                    .addTo(nearbyLayer)
+                    .bindPopup(`<b>${label}</b><br>${name}`);
+            });
+        } catch (err) {
+            document.getElementById("map-key-hint").textContent = "Unable to fetch nearby services right now. Map is still available.";
+        }
+    }
+
+    function locateAndCenter() {
+        if (!navigator.geolocation) {
+            alert("Geolocation is not supported in this browser.");
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                const lat = pos.coords.latitude;
+                const lon = pos.coords.longitude;
+                currentLat = lat;
+                currentLon = lon;
+                map.setView([lat, lon], 14);
+                userMarker.setLatLng([lat, lon]);
+                loadNearbyServices(lat, lon);
+            },
+            () => alert("Location permission denied or unavailable."),
+            { enableHighAccuracy: true, timeout: 10000 }
+        );
+    }
+
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            (pos) => initMap(pos.coords.latitude, pos.coords.longitude),
+            () => initMap(19.076, 72.8777),
+            { enableHighAccuracy: true, timeout: 10000 }
+        );
+    } else {
+        initMap(19.076, 72.8777);
+    }
+
+    document.getElementById("btn-locate").addEventListener("click", locateAndCenter);
+    document.getElementById("btn-refresh").addEventListener("click", () => loadNearbyServices(currentLat, currentLon));
+    document.getElementById("logout-link").addEventListener("click", async (e) => {
+        e.preventDefault();
+        await fetch("/auth/logout", { method: "POST" });
+        window.location.href = "login.html";
+    });
+    </script>
+</body>
+</html>
